@@ -24,7 +24,12 @@ import {
   extractSpreadsheetId, 
   fetchGoogleSheetData,
   updateSeatInGoogleSheet,
-  pushFullPlanToGoogleSheet
+  pushFullPlanToGoogleSheet,
+  syncPlanImageSettingsToGoogleSheet,
+  syncUnassignedGuestsToGoogleSheet,
+  syncMetadataToGoogleSheet,
+  syncAllWebDataToGoogleSheet,
+  createAllCategoryTabsInSpreadsheet
 } from './utils/googleSheetSync';
 import { 
   getConfiguredSheetUrl, 
@@ -101,15 +106,41 @@ export default function App() {
     }
   }, []);
 
-  // Update metadata helper (e.g. year, title, etc.)
+  // Update metadata helper (e.g. year, title, etc. with automatic Google Sheet sync)
   const handleUpdateMetadata = (updated: Partial<SeatingPlanMetadata>) => {
-    setPlanState(prev => ({
-      ...prev,
-      metadata: {
+    let nextMeta: SeatingPlanMetadata | null = null;
+    setPlanState(prev => {
+      nextMeta = {
         ...prev.metadata,
         ...updated,
+      };
+      return {
+        ...prev,
+        metadata: nextMeta,
+      };
+    });
+
+    const sheetUrl = getConfiguredSheetUrl();
+    const token = getAccessToken();
+    if (token && sheetUrl && nextMeta) {
+      const currentMeta = nextMeta as SeatingPlanMetadata;
+      syncMetadataToGoogleSheet(sheetUrl, token, currentMeta).catch(() => {});
+      if (
+        updated.bgDriveUrl !== undefined ||
+        updated.bgImageUrl !== undefined ||
+        updated.bgOpacity !== undefined ||
+        updated.bgPlacement !== undefined ||
+        updated.year !== undefined
+      ) {
+        syncPlanImageSettingsToGoogleSheet(sheetUrl, token, {
+          driveUrl: currentMeta.bgDriveUrl,
+          imageUrl: currentMeta.bgImageUrl || undefined,
+          placement: currentMeta.bgPlacement,
+          opacity: currentMeta.bgOpacity,
+          year: currentMeta.year,
+        }).catch(() => {});
       }
-    }));
+    }
   };
 
   // Toast notification helper
@@ -324,9 +355,15 @@ export default function App() {
 
           // Auto-update Plan Image if Google Sheet specified one via #PLAN_IMAGE
           let nextMetadata = prev.metadata;
+          if (result.eventMetadata) {
+            nextMetadata = {
+              ...nextMetadata,
+              ...result.eventMetadata,
+            };
+          }
           if (result.planImageUrl) {
             nextMetadata = {
-              ...prev.metadata,
+              ...nextMetadata,
               bgImageUrl: result.planImageUrl,
               ...(result.planDriveUrl ? { bgDriveUrl: result.planDriveUrl } : {}),
             };
@@ -336,7 +373,7 @@ export default function App() {
             }
           }
 
-          if (!hasChanges && unassignedList.length === (prev.unassignedGuests || []).length && !result.planImageUrl) {
+          if (!hasChanges && unassignedList.length === (prev.unassignedGuests || []).length && !result.planImageUrl && !result.eventMetadata) {
             return prev;
           }
 
@@ -509,6 +546,8 @@ export default function App() {
       if (token && sheetUrl) {
         try {
           await updateSeatInGoogleSheet(sheetUrl, token, assignedSeat, 'update');
+          const remainingUnassigned = (planState.unassignedGuests || []).filter(g => g.id !== guest.id);
+          syncUnassignedGuestsToGoogleSheet(sheetUrl, token, remainingUnassigned).catch(() => {});
         } catch {
           // silent
         }
@@ -1031,7 +1070,6 @@ export default function App() {
                 onAddSeatToRow={handleAddSeatToRow}
                 onRemoveSeat={handleRemoveSeat}
                 onExportCsv={() => exportToCsv(planState.seats)}
-                onOpenGoogleSheets={() => setIsGoogleSheetModalOpen(true)}
               />
             )}
           </motion.div>
@@ -1074,6 +1112,7 @@ export default function App() {
         isOpen={isGoogleSheetModalOpen}
         onClose={() => setIsGoogleSheetModalOpen(false)}
         seats={planState.seats}
+        planState={planState}
         onApplySync={handleGoogleSheetSync}
         currentDriveUrl={getSavedDriveImageUrl() || planState.metadata?.bgDriveUrl || undefined}
         onDriveUrlSaved={(url) => setSavedDriveImageUrl(url)}

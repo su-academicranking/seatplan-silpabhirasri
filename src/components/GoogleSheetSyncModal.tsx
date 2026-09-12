@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Seat, UnassignedGuest } from '../types';
-import { User } from 'firebase/auth';
+import { Seat, UnassignedGuest, SeatingPlanState } from '../types';
 import { 
   X, RefreshCw, Download, Copy, ExternalLink, 
   CheckCircle2, AlertCircle, FileSpreadsheet, Link2, 
   Clipboard, HelpCircle, Check, ArrowRight, LogOut,
-  Layers, Sparkles, ShieldCheck, Image as ImageIcon, RotateCw
+  Layers, Sparkles, ShieldCheck, Image as ImageIcon, RotateCw,
+  Globe
 } from 'lucide-react';
 import { 
   fetchGoogleSheetData, 
@@ -16,13 +16,22 @@ import {
   downloadGoogleSheetTemplateCsv,
   saveDriveImageLinkToGoogleSheet,
   extractSpreadsheetId,
-  pushFullPlanToGoogleSheet
+  pushFullPlanToGoogleSheet,
+  createAllCategoryTabsInSpreadsheet,
+  syncAllWebDataToGoogleSheet,
+  TAB_GUESTS,
+  TAB_UNASSIGNED,
+  TAB_PLAN_IMAGE,
+  TAB_METADATA,
+  TAB_CHECKIN_LOG
 } from '../utils/googleSheetSync';
 import { 
+  AuthUser,
   initAuth, 
   googleSignIn, 
   logoutGoogle, 
-  getAccessToken 
+  getAccessToken,
+  requestGoogleAccessToken
 } from '../utils/googleAuth';
 import { 
   getConfiguredSheetUrl, 
@@ -38,6 +47,7 @@ interface GoogleSheetSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   seats: Record<string, Seat>;
+  planState?: SeatingPlanState;
   onApplySync: (
     updatedSeats: Record<string, Seat>, 
     summaryMsg: string, 
@@ -53,6 +63,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   isOpen,
   onClose,
   seats,
+  planState,
   onApplySync,
 }) => {
   const [sheetUrl, setSheetUrl] = useState<string>('');
@@ -74,7 +85,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
   const [isPushing, setIsPushing] = useState<boolean>(false);
 
   // Google OAuth User State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [availableSheets, setAvailableSheets] = useState<string[]>([]);
   const [selectedSheetTab, setSelectedSheetTab] = useState<string>('');
   const [spreadsheetTitle, setSpreadsheetTitle] = useState<string>('');
@@ -94,6 +105,33 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
     };
   }, []);
 
+  // Helper to ensure all category tabs exist and sync data automatically
+  const autoEnsureCategoryTabs = async (targetUrl: string, token: string) => {
+    try {
+      const stateToSync: SeatingPlanState = planState || {
+        seats,
+        unassignedGuests: parsedUnassigned,
+        metadata: {
+          eventTitle: 'ผังที่นั่งพิธีการ',
+          eventSubtitle: '',
+          venueName: 'ห้องประชุม',
+          ceremonyTime: '',
+          notes: '',
+          lastUpdated: new Date().toISOString(),
+          year: String(new Date().getFullYear()),
+          bgOpacity: 0.85,
+          bgPlacement: 'stage',
+        }
+      };
+      const res = await createAllCategoryTabsInSpreadsheet(targetUrl, token, stateToSync);
+      if (res.success && res.createdTabs.length > 0) {
+        setSuccessMsg(`ระบบสร้างแท็บข้อมูล 5 ประเภทใน Google Sheet และเชื่อมโยงข้อมูลอัตโนมัติเรียบร้อยแล้ว: ${res.createdTabs.join(', ')} ✓`);
+      }
+    } catch (err) {
+      console.warn('Auto ensure category tabs warning:', err);
+    }
+  };
+
   // Load saved URL and last sync time on open (supports global default, URL param, or localStorage)
   useEffect(() => {
     if (isOpen) {
@@ -103,25 +141,34 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
       if (savedTime) setLastSyncTime(savedTime);
       setErrorMsg('');
       setSuccessMsg('');
+
+      // Auto-ensure tabs immediately if token & URL are already present
+      const token = getAccessToken();
+      if (token && savedUrl) {
+        autoEnsureCategoryTabs(savedUrl, token);
+      }
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // Handle Google Sign-in
+  // Handle Google Sign-in with immediate tab creation and auto-sync
   const handleGoogleSignIn = async () => {
     setIsLoggingIn(true);
     setErrorMsg('');
     try {
-      const { user } = await googleSignIn();
+      const { user, accessToken } = await googleSignIn();
       setCurrentUser(user);
-      setSuccessMsg(`เข้าสู่ระบบด้วย Google สำเร็จ: ${user.email}`);
 
-      // If sheet URL already exists, automatically trigger fetch
-      if (sheetUrl.trim()) {
+      const targetUrl = (sheetUrl || getConfiguredSheetUrl() || DEFAULT_GOOGLE_SHEET_URL || '').trim();
+      if (targetUrl && accessToken) {
+        setSuccessMsg(`เข้าสู่ระบบสำเร็จ: ${user.email} • กำลังสร้างแท็บข้อมูลและเชื่อมโยงข้อมูลอัตโนมัติ...`);
+        await autoEnsureCategoryTabs(targetUrl, accessToken);
         setTimeout(() => {
-          handleFetchFromUrl(sheetUrl.trim(), selectedSheetTab);
+          handleFetchFromUrl(targetUrl, selectedSheetTab);
         }, 300);
+      } else {
+        setSuccessMsg(`เข้าสู่ระบบด้วย Google สำเร็จ: ${user.email}`);
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -198,6 +245,11 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
         
         // Save to localStorage
         localStorage.setItem('google_sheet_sync_url', targetUrl);
+
+        // If authenticated with write access, immediately ensure all 5 category tabs exist in background
+        if (token) {
+          autoEnsureCategoryTabs(targetUrl, token);
+        }
       } else {
         setErrorMsg(result.message);
       }
@@ -312,7 +364,7 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
     onClose();
   };
 
-  // Push all plan data from web application to Google Sheet (Two-Way Sync)
+  // Push all plan data from web application to Google Sheet across all category tabs (Two-Way Sync)
   const handlePushToGoogleSheet = async () => {
     const targetUrl = sheetUrl.trim() || getConfiguredSheetUrl();
     if (!targetUrl) {
@@ -322,8 +374,12 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
 
     let token = getAccessToken();
     if (!token) {
-      setErrorMsg('กรุณาเข้าสู่ระบบ Google เพื่อยืนยันสิทธิ์ในการเขียนข้อมูลลง Google Sheet');
-      return;
+      try {
+        token = await requestGoogleAccessToken();
+      } catch (authErr) {
+        setErrorMsg('กรุณาเข้าสู่ระบบ Google เพื่อยืนยันสิทธิ์ในการเขียนข้อมูลลง Google Sheet');
+        return;
+      }
     }
 
     setIsPushing(true);
@@ -331,13 +387,23 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
     setSuccessMsg('');
 
     try {
-      const pushRes = await pushFullPlanToGoogleSheet(
-        targetUrl,
-        token,
+      const stateToSync: SeatingPlanState = planState || {
         seats,
-        parsedUnassigned,
-        selectedSheetTab || undefined
-      );
+        unassignedGuests: parsedUnassigned,
+        metadata: {
+          eventTitle: 'ผังที่นั่งพิธีการ',
+          eventSubtitle: '',
+          venueName: 'ห้องประชุม',
+          ceremonyTime: '',
+          notes: '',
+          lastUpdated: new Date().toISOString(),
+          year: String(new Date().getFullYear()),
+          bgOpacity: 0.85,
+          bgPlacement: 'stage',
+        }
+      };
+
+      const pushRes = await syncAllWebDataToGoogleSheet(targetUrl, token, stateToSync);
 
       if (pushRes.success) {
         setSuccessMsg(pushRes.message);
@@ -410,6 +476,60 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+
+          {/* Google Account Authentication Banner */}
+          <div className="p-3 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50/60 border border-emerald-200 rounded-xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-800">
+                    {currentUser ? 'เชื่อมต่อบัญชี Google แล้ว' : 'เชื่อมต่อบัญชี Google (สิทธิ์แก้ไข)'}
+                  </span>
+                  {currentUser ? (
+                    <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[10px] font-semibold rounded-md border border-emerald-200 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                      เชื่อมต่อแล้ว
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded-md border border-amber-200">
+                      ยังไม่เชื่อมต่อ
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-600">
+                  {currentUser ? (
+                    <span>{currentUser.displayName || currentUser.email} • พร้อมสร้างแท็บ 5 ประเภทและซิงก์ข้อมูลอัตโนมัติ</span>
+                  ) : (
+                    <span>เข้าสู่ระบบเพื่อให้ระบบสร้างแท็บ 5 ประเภทและซิงก์ข้อมูลไป Google Sheet อัตโนมัติ</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {currentUser ? (
+              <button
+                type="button"
+                onClick={handleGoogleSignOut}
+                className="px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>ออกจากระบบ</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoggingIn}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer shrink-0"
+              >
+                <ShieldCheck className={`w-3.5 h-3.5 ${isLoggingIn ? 'animate-spin' : ''}`} />
+                <span>{isLoggingIn ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบด้วย Google'}</span>
+              </button>
+            )}
+          </div>
 
           {/* Google Sheet URL Input */}
           <div className="space-y-3">
@@ -500,11 +620,46 @@ export const GoogleSheetSyncModal: React.FC<GoogleSheetSyncModalProps> = ({
 
           {/* Error message */}
           {errorMsg && (
-            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-800 animate-in fade-in duration-150">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <div className="flex-1 leading-relaxed">
-                {errorMsg}
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 space-y-2.5 text-xs text-rose-800 animate-in fade-in duration-150">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1 leading-relaxed whitespace-pre-line font-medium">
+                  {errorMsg}
+                </div>
               </div>
+
+              {/* Action buttons if error is related to popup, domain, or authentication */}
+              {(errorMsg.includes('unauthorized-domain') || errorMsg.includes('ป๊อปอัป') || errorMsg.includes('popup') || errorMsg.includes('เข้าสู่ระบบ')) && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-rose-200/60">
+                  <button
+                    type="button"
+                    onClick={() => window.open(window.location.href, '_blank')}
+                    className="px-2.5 py-1.5 bg-white hover:bg-rose-100/50 border border-rose-300 rounded-lg text-rose-700 text-2xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>เปิดแอปในหน้าต่างใหม่ (Open in new tab)</span>
+                  </button>
+
+                  {sheetUrl.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => handleFetchFromUrl(sheetUrl.trim())}
+                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-2xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span>ดึงข้อมูลผังจากลิงก์สาธารณะทันที</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setErrorMsg('')}
+                    className="px-2 py-1 text-rose-600 hover:text-rose-800 text-2xs ml-auto cursor-pointer"
+                  >
+                    ปิดการแจ้งเตือน
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

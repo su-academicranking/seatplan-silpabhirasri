@@ -85,7 +85,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         </div>
 
         {/* Tab switcher */}
-        <div className="flex items-center justify-between border-b border-slate-200 my-4 text-xs font-semibold">
+        <div className="flex items-center border-b border-slate-200 my-4 text-xs font-semibold">
           <div className="flex">
             <button
               type="button"
@@ -110,20 +110,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               นำเข้าไฟล์ Backup (.JSON)
             </button>
           </div>
-
-          {onOpenGoogleSheets && (
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onOpenGoogleSheets();
-              }}
-              className="pb-2 px-3 text-emerald-700 hover:text-emerald-800 flex items-center gap-1.5 transition-colors cursor-pointer font-bold hover:underline"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>ซิงก์จาก Google Sheets &gt;</span>
-            </button>
-          )}
         </div>
 
         {errorMsg && (

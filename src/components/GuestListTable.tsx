@@ -298,20 +298,6 @@ export const GuestListTable: React.FC<GuestListTableProps> = ({
               </div>
             )}
 
-            {/* Google Sheets Sync button */}
-            {onOpenGoogleSheets && (
-              <button
-                type="button"
-                onClick={onOpenGoogleSheets}
-                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
-                title="เชื่อมต่อ & ซิงก์ข้อมูลกับ Google Sheets"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span className="hidden lg:inline">เชื่อมต่อ Google Sheets</span>
-                <span className="inline lg:hidden">Sheets</span>
-              </button>
-            )}
-
             {/* Export button */}
             <button
               type="button"
