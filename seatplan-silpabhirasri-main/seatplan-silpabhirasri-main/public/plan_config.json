@@ -1,0 +1,9 @@
+{
+  "version": "1.4",
+  "planImageUrl": "https://lh3.googleusercontent.com/d/1meSAmfFo0p5ScU6RHQWDYfS6ryylAZ80",
+  "planDriveUrl": "https://drive.google.com/file/d/1meSAmfFo0p5ScU6RHQWDYfS6ryylAZ80/view?usp=drive_link",
+  "googleSheetUrl": "https://docs.google.com/spreadsheets/d/198GFNXlcZs4eC61c73eMp3xQj5D8HDXdzTiEBZfb288/edit?usp=sharing",
+  "opacity": 0.95,
+  "description": "Seating plan configuration synced with GitHub repository. Update this file on GitHub to automatically update the seating plan image for all users.",
+  "lastUpdated": "2026-09-11"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "ผังที่นั่งวันศิลป์ พีระศรี (Silpa Bhirasri Seating Plan)",
+  "description": "ระบบออกแบบและแก้ไขผังที่นั่งรับรองแขกผู้มีเกียรติในพิธีการวันศิลป์ พีระศรี แบบ Real-time รองรับการปรับเปลี่ยนชื่อ ตำแหน่งที่นั่ง กลุ่ม Set และการพิมพ์/ส่งออก",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
